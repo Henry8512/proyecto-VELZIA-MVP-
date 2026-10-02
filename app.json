@@ -1,0 +1,13 @@
+{
+  "expo": {
+    "name": "VELZIA",
+    "slug": "velzia",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "splash": {"backgroundColor":"#071A33"},
+    "ios": {"supportsTablet": true},
+    "android": {"adaptiveIcon": {"backgroundColor":"#071A33"}},
+    "web": {"bundler":"metro"}
+  }
+}
