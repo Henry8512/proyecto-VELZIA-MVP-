@@ -38,6 +38,7 @@ function isFinancialData(value) {
         isAmount(String(debt.initialBalance)) &&
         isAmount(String(debt.payment)) &&
         isValidAnnualRate(debt.rate) &&
+        (debt.rateType === undefined || debt.rateType === 'nominal' || debt.rateType === 'effective') &&
         (debt.dueDay === null ||
           (Number.isInteger(debt.dueDay) && debt.dueDay >= 1 && debt.dueDay <= 31)) &&
         Array.isArray(debt.payments) &&
@@ -103,6 +104,7 @@ function migrateFinancialData(value) {
       initialBalance: Number(debt.balance),
       payment: Number(debt.payment),
       rate: Number(debt.rate),
+      rateType: 'nominal',
       dueDay: null,
       payments: [],
     })),

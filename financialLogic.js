@@ -12,6 +12,13 @@ export function isValidAnnualRate(value) {
     Number(normalized) <= 1000;
 }
 
+export function getMonthlyInterestRate(annualRate, rateType = 'nominal') {
+  const rate = Number(annualRate);
+  return rateType === 'effective'
+    ? Math.pow(1 + rate / 100, 1 / 12) - 1
+    : rate / 1200;
+}
+
 export function calculateDebtProgress(debts) {
   const initialDebt = debts.reduce((total, debt) => total + debt.initialBalance, 0);
   const currentDebt = debts.reduce((total, debt) => total + debt.balance, 0);
@@ -65,13 +72,14 @@ export function buildPaymentCalendar(debts, fromDate = new Date(), daysAhead = 9
   return events.sort((left, right) => left.dueDate - right.dueDate);
 }
 
-export function simulateDebtPayoff(debts, monthlyBudget) {
+export function simulateDebtPayoff(debts, monthlyBudget, strategy = 'avalanche') {
   const budget = Number(monthlyBudget);
   const balances = debts.map(debt => ({
     name: debt.name,
     balance: Number(debt.balance),
     minimum: Number(debt.payment),
-    monthlyRate: Number(debt.rate) / 1200,
+    monthlyRate: getMonthlyInterestRate(debt.rate, debt.rateType),
+    rateType: debt.rateType || 'nominal',
   }));
 
   if (balances.every(debt => debt.balance === 0)) {
@@ -82,10 +90,15 @@ export function simulateDebtPayoff(debts, monthlyBudget) {
     return {status: 'invalid-budget', months: 0, interest: 0, totalPaid: 0};
   }
 
+  if (strategy !== 'avalanche' && strategy !== 'snowball') {
+    return {status: 'invalid-strategy', months: 0, interest: 0, totalPaid: 0};
+  }
+
   if (balances.some(debt =>
     !Number.isFinite(debt.balance) || debt.balance < 0 ||
     !Number.isFinite(debt.minimum) || debt.minimum < 0 ||
-    !Number.isFinite(debt.monthlyRate) || debt.monthlyRate < 0
+    !Number.isFinite(debt.monthlyRate) || debt.monthlyRate < 0 ||
+    (debt.rateType !== 'nominal' && debt.rateType !== 'effective')
   )) {
     return {status: 'invalid-debt', months: 0, interest: 0, totalPaid: 0};
   }
@@ -133,16 +146,27 @@ export function simulateDebtPayoff(debts, monthlyBudget) {
       totalPaid += payment;
     });
 
-    const avalancheOrder = balances
+    const targetOrder = balances
       .filter(debt => debt.balance > 0)
-      .sort((left, right) => right.monthlyRate - left.monthlyRate);
+      .sort((left, right) => strategy === 'snowball'
+        ? left.balance - right.balance
+        : right.monthlyRate - left.monthlyRate);
 
-    avalancheOrder.forEach(debt => {
+    targetOrder.forEach(debt => {
       const payment = Math.min(debt.balance, remainingBudget);
       debt.balance = Math.max(0, debt.balance - payment);
       remainingBudget -= payment;
       totalPaid += payment;
     });
+  }
+
+  if (balances.every(debt => debt.balance === 0)) {
+    return {
+      status: 'payoff',
+      months: 600,
+      interest: Math.round(totalInterest),
+      totalPaid: Math.round(totalPaid),
+    };
   }
 
   return {status: 'over-50-years', months: 600, interest: Math.round(totalInterest), totalPaid: Math.round(totalPaid)};

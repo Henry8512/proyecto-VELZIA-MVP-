@@ -103,6 +103,12 @@ test('acepta tasas anuales decimales válidas y rechaza tasas fuera del rango', 
   assert.equal(finance.isValidAnnualRate(''), false);
 });
 
+test('compara tasas nominales y efectivas por su interés mensual equivalente', () => {
+  assert.equal(finance.getMonthlyInterestRate(12, 'nominal'), 0.01);
+  assert.ok(finance.getMonthlyInterestRate(12, 'nominal') >
+    finance.getMonthlyInterestRate(12, 'effective'));
+});
+
 test('el progreso refleja únicamente la diferencia entre saldo inicial y actual', () => {
   const progress = finance.calculateDebtProgress([
     debt(),
@@ -116,6 +122,15 @@ test('el progreso refleja únicamente la diferencia entre saldo inicial y actual
     paymentCount: 0,
   });
   assert.equal(finance.calculateDebtProgress([]).percentage, 0);
+});
+
+test('el ajuste manual del saldo actual se refleja frente al saldo inicial conservado', () => {
+  const progress = finance.calculateDebtProgress([
+    debt({initialBalance: 1000, balance: 1100}),
+  ]);
+  assert.equal(progress.principalReduced, 0);
+  assert.equal(progress.percentage, 0);
+  assert.equal(progress.currentDebt, 1100);
 });
 
 test('el calendario genera vencimientos reales y omite deudas sin fecha', () => {
@@ -171,6 +186,52 @@ test('la simulación aplica la tasa anual convertida a interés mensual', () => 
   assert.equal(result.totalPaid, 1010);
 });
 
+test('la tasa efectiva anual se convierte a su equivalente mensual', () => {
+  const result = finance.simulateDebtPayoff([
+    debt({balance: 10000, payment: 1000, rate: 12, rateType: 'effective'}),
+  ], '20000');
+  assert.equal(result.status, 'payoff');
+  assert.equal(result.interest, 95);
+  assert.equal(result.totalPaid, 10095);
+});
+
+test('la estrategia avalancha prioriza la tasa mayor y bola de nieve el saldo menor', () => {
+  const debts = [
+    debt({id: 'high-rate', name: 'Tasa alta', balance: 1000, payment: 100, rate: 24}),
+    debt({id: 'low-balance', name: 'Saldo menor', balance: 500, payment: 100, rate: 0}),
+  ];
+  const avalanche = finance.simulateDebtPayoff(debts, '300', 'avalanche');
+  const snowball = finance.simulateDebtPayoff(debts, '300', 'snowball');
+  assert.equal(avalanche.status, 'payoff');
+  assert.equal(snowball.status, 'payoff');
+  assert.ok(avalanche.interest < snowball.interest);
+});
+
+test('caso sintético de dos deudas coincide con el interés mensual compuesto del modelo', () => {
+  const debts = [
+    debt({id: 'high-rate', name: 'Tasa alta', balance: 1000, payment: 100, rate: 12}),
+    debt({id: 'no-interest', name: 'Sin interés', balance: 500, payment: 100, rate: 0}),
+  ];
+  const result = finance.simulateDebtPayoff(debts, '300', 'avalanche');
+
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), {
+    status: 'payoff',
+    months: 6,
+    interest: 31,
+    totalPaid: 1531,
+  });
+});
+
+test('la simulación considera pagada la deuda exactamente en el mes 600', () => {
+  const result = finance.simulateDebtPayoff([
+    debt({balance: 60000, payment: 100, rate: 0}),
+  ], '100');
+  assert.equal(result.status, 'payoff');
+  assert.equal(result.months, 600);
+  assert.equal(result.interest, 0);
+  assert.equal(result.totalPaid, 60000);
+});
+
 test('la simulación indica cuando el presupuesto no cubre las cuotas mínimas', () => {
   const result = finance.simulateDebtPayoff([
     debt({payment: 60}),
@@ -201,6 +262,14 @@ test('la persistencia guarda y recupera el formato actual', async () => {
   assert.deepEqual(JSON.parse(JSON.stringify(await storage.loadFinancialData())), data);
 });
 
+test('la persistencia acepta una deuda sin fecha de vencimiento', async () => {
+  storedValue = null;
+  const data = validData({debts: [debt({dueDay: null})]});
+  await storage.saveFinancialData(data);
+  const saved = await storage.loadFinancialData();
+  assert.equal(saved.debts[0].dueDay, null);
+});
+
 test('la migración conserva datos de la versión previa sin inventar vencimientos', async () => {
   storedValue = JSON.stringify({
     version: 1,
@@ -219,6 +288,7 @@ test('la migración conserva datos de la versión previa sin inventar vencimient
   assert.equal(migrated.expenseCategories.other, '600000');
   assert.equal(migrated.debts[0].balance, 500000);
   assert.equal(migrated.debts[0].initialBalance, 500000);
+  assert.equal(migrated.debts[0].rateType, 'nominal');
   assert.equal(migrated.debts[0].dueDay, null);
   assert.deepEqual(JSON.parse(JSON.stringify(migrated.debts[0].payments)), []);
 });
@@ -235,6 +305,9 @@ test('los datos corruptos o inválidos se rechazan sin sobrescribir el almacenam
 
   await assert.rejects(storage.saveFinancialData(validData({
     expenseCategories: {...validData().expenseCategories, food: '-1'},
+  })));
+  await assert.rejects(storage.saveFinancialData(validData({
+    debts: [debt({rateType: 'unknown'})],
   })));
   assert.equal(writeCount, writesBeforeInvalid);
 });

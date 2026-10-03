@@ -13,6 +13,7 @@ import {loadFinancialData, saveFinancialData} from './financialStorage';
 import {
   buildPaymentCalendar,
   calculateDebtProgress,
+  getMonthlyInterestRate,
   isValidAnnualRate,
   simulateDebtPayoff,
   sumExpenseCategories,
@@ -21,10 +22,11 @@ import {
 const C = {
   navy: '#071A33',
   teal: '#10BFA8',
+  tealText: '#087F72',
   mint: '#DDF8F2',
   bg: '#F5F8FC',
   text: '#10233D',
-  muted: '#6E7B8D',
+  muted: '#596B7D',
   white: '#FFFFFF',
   red: '#B42318',
   line: '#E4EAF2',
@@ -50,10 +52,11 @@ const money = value => '$' + Math.round(Number(value) || 0).toLocaleString('es-C
 const numericValue = value => value.trim() !== '' && Number.isSafeInteger(Number(value)) && Number(value) >= 0;
 const makeId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-function Button({children, onPress, secondary = false, danger = false}) {
+function Button({children, onPress, secondary = false, danger = false, selected = false}) {
   return (
     <TouchableOpacity
       accessibilityRole="button"
+      accessibilityState={selected ? {selected: true} : undefined}
       onPress={onPress}
       style={[styles.button, secondary && styles.buttonSecondary, danger && styles.buttonDanger]}>
       <Text style={[styles.buttonText, secondary && styles.buttonTextSecondary, danger && styles.buttonTextDanger]}>
@@ -233,6 +236,7 @@ export default function App() {
           <Text style={styles.logo}>VELZIA</Text>
           <Text style={styles.tag}>Toma el control de tu dinero.</Text>
           <Text style={styles.welcomeCopy}>Organiza tus deudas, planifica tus pagos y avanza hacia tus metas.</Text>
+          <Text style={styles.welcomePrivacy}>Tus datos se guardan en este dispositivo. No hay respaldo en una cuenta y desinstalar la app puede borrarlos.</Text>
           <Button onPress={() => nav('profile')}>Comenzar</Button>
         </View>
       </SafeAreaView>
@@ -269,12 +273,14 @@ export default function App() {
             <Expenses
               categories={expenseCategories}
               onChange={setExpenseCategories}
+              onPrevious={() => nav('profile')}
               onNext={() => nav('debt')}
             />
           ) : null}
           {screen === 'debt' ? (
             <Debt
               debts={debts}
+              onPrevious={() => nav('expenses')}
               onAdd={debt => setDebts([...debts, debt])}
               onDelete={id => setDebts(debts.filter(debt => debt.id !== id))}
               onPayment={(id, payment) => setDebts(debts.map(debt => (
@@ -315,11 +321,11 @@ export default function App() {
               setMonthly={setMonthly}
             />
           ) : null}
-          {screen === 'simulator' ? <Simulator debts={debts} monthly={monthly} setMonthly={setMonthly} /> : null}
+          {screen === 'simulator' ? <Simulator available={available} debts={debts} monthly={monthly} setMonthly={setMonthly} /> : null}
           {screen === 'calendar' ? <Calendar debts={debts} /> : null}
           {screen === 'progress' ? <Progress debts={debts} /> : null}
         </ScrollView>
-        <View style={styles.tabbar}>
+        {onboardingComplete ? <View style={styles.tabbar}>
           {[
             ['home', 'Inicio', '⌂'],
             ['debt', 'Deudas', '▣'],
@@ -328,7 +334,9 @@ export default function App() {
             ['progress', 'Progreso', '◉'],
           ].map(([id, label, icon]) => (
             <TouchableOpacity
+              accessibilityLabel={label}
               accessibilityRole="button"
+              accessibilityState={{selected: screen === id}}
               key={id}
               onPress={() => nav(id)}
               style={styles.tab}>
@@ -336,7 +344,7 @@ export default function App() {
               <Text style={[styles.tabText, screen === id && styles.activeTab]}>{label}</Text>
             </TouchableOpacity>
           ))}
-        </View>
+        </View> : null}
       </View>
     </SafeAreaView>
   );
@@ -356,6 +364,7 @@ function isValidDraft(data) {
       numericValue(String(debt.initialBalance)) &&
       numericValue(String(debt.payment)) &&
       isValidAnnualRate(debt.rate) &&
+      (debt.rateType === undefined || debt.rateType === 'nominal' || debt.rateType === 'effective') &&
       (debt.dueDay === null ||
         (Number.isInteger(debt.dueDay) && debt.dueDay >= 1 && debt.dueDay <= 31)) &&
       debt.payments.every(payment =>
@@ -388,7 +397,7 @@ function Profile({income, name, onIncome, onName, onNext}) {
   );
 }
 
-function Expenses({categories, onChange, onNext}) {
+function Expenses({categories, onChange, onNext, onPrevious}) {
   const [error, setError] = useState('');
   return (
     <>
@@ -408,20 +417,23 @@ function Expenses({categories, onChange, onNext}) {
           <Text style={styles.debtAmount}>{money(sumExpenseCategories(categories))}</Text>
         </View>
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
-        <Button onPress={() => {
-          if (!Object.values(categories).every(numericValue)) {
-            setError('Completa cada categoría con un valor igual o mayor a cero.');
-            return;
-          }
-          setError('');
-          onNext();
-        }}>Continuar</Button>
+        <View style={styles.actionRow}>
+          <Button secondary onPress={onPrevious}>Atrás</Button>
+          <Button onPress={() => {
+            if (!Object.values(categories).every(numericValue)) {
+              setError('Completa cada categoría con un valor igual o mayor a cero.');
+              return;
+            }
+            setError('');
+            onNext();
+          }}>Continuar</Button>
+        </View>
       </Card>
     </>
   );
 }
 
-function Debt({debts, onAdd, onDelete, onPayment, onUpdate, onNext}) {
+function Debt({debts, onAdd, onDelete, onPayment, onUpdate, onNext, onPrevious}) {
   const [form, setForm] = useState(emptyDebtForm());
   const [editingId, setEditingId] = useState(null);
   const [formError, setFormError] = useState('');
@@ -439,10 +451,11 @@ function Debt({debts, onAdd, onDelete, onPayment, onUpdate, onNext}) {
     const balance = Number(form.balance);
     const payment = Number(form.payment);
     const rate = Number(form.rate);
-    const dueDay = Number(form.dueDay);
+    const dueDay = form.dueDay.trim() === '' ? null : Number(form.dueDay);
     if (!form.name.trim() || !numericValue(form.balance) || !numericValue(form.payment) ||
-      !isValidAnnualRate(form.rate) || !Number.isInteger(dueDay) || dueDay < 1 || dueDay > 31) {
-      setFormError('Revisa el nombre, los montos, la tasa anual (0–1000%) y el vencimiento (1–31).');
+      !isValidAnnualRate(form.rate) ||
+      (dueDay !== null && (!Number.isInteger(dueDay) || dueDay < 1 || dueDay > 31))) {
+      setFormError('Revisa el nombre, los montos, la tasa anual (0–1000%) y, si ingresas vencimiento, usa un día entre 1 y 31.');
       return;
     }
 
@@ -454,6 +467,7 @@ function Debt({debts, onAdd, onDelete, onPayment, onUpdate, onNext}) {
       initialBalance: existing?.initialBalance ?? balance,
       payment,
       rate,
+      rateType: form.rateType,
       dueDay,
       payments: existing?.payments ?? [],
     };
@@ -474,6 +488,7 @@ function Debt({debts, onAdd, onDelete, onPayment, onUpdate, onNext}) {
       balance: String(debt.balance),
       payment: String(debt.payment),
       rate: String(debt.rate),
+      rateType: debt.rateType || 'nominal',
       dueDay: debt.dueDay === null ? '' : String(debt.dueDay),
     });
     setFormError('');
@@ -517,7 +532,16 @@ function Debt({debts, onAdd, onDelete, onPayment, onUpdate, onNext}) {
         <Field label="Saldo actual" numeric onChangeText={value => changeForm('balance', value)} value={form.balance} />
         <Field label="Cuota mínima mensual" numeric onChangeText={value => changeForm('payment', value)} value={form.payment} />
         <Field label="Tasa anual (%)" numeric onChangeText={value => changeForm('rate', value)} value={form.rate} />
-        <Field label="Día de vencimiento (1–31)" numeric onChangeText={value => changeForm('dueDay', value)} value={form.dueDay} />
+        <Text style={styles.label}>Tipo de tasa anual</Text>
+        <View style={styles.actionRow}>
+          <Button selected={form.rateType === 'nominal'} secondary={form.rateType !== 'nominal'} onPress={() => changeForm('rateType', 'nominal')}>Nominal</Button>
+          <Button selected={form.rateType === 'effective'} secondary={form.rateType !== 'effective'} onPress={() => changeForm('rateType', 'effective')}>Efectiva</Button>
+        </View>
+        <Text style={styles.note}>Usa el tipo indicado por tu acreedor. No ingreses la CAE como tasa de interés.</Text>
+        <Field label="Día de vencimiento (opcional, 1–31)" numeric onChangeText={value => changeForm('dueDay', value)} value={form.dueDay} />
+        {!editingId ? null : (
+          <Text style={styles.note}>El saldo inicial se conserva para medir el progreso. Corregir el saldo actual puede cambiar el porcentaje mostrado.</Text>
+        )}
         {formError ? <Text style={styles.errorText}>{formError}</Text> : null}
         <Button onPress={saveDebt}>{editingId ? 'Guardar cambios' : '+ Agregar deuda'}</Button>
         {editingId ? <Button secondary onPress={() => { setEditingId(null); setForm(emptyDebtForm()); setFormError(''); }}>Cancelar edición</Button> : null}
@@ -531,7 +555,7 @@ function Debt({debts, onAdd, onDelete, onPayment, onUpdate, onNext}) {
             <Text style={styles.debtAmount}>{money(debt.balance)}</Text>
           </View>
           <Text style={styles.muted}>
-            Cuota mínima {money(debt.payment)} · Tasa anual {debt.rate}% · {debt.dueDay ? `Vence el día ${debt.dueDay}` : 'Vencimiento sin definir'}
+            Cuota mínima {money(debt.payment)} · Tasa anual {debt.rate}% {debt.rateType === 'effective' ? 'efectiva' : 'nominal'} · {debt.dueDay ? `Vence el día ${debt.dueDay}` : 'Vencimiento sin definir'}
           </Text>
           <Text style={styles.muted}>Pagos registrados: {debt.payments.length}</Text>
           <View style={styles.actionRow}>
@@ -574,13 +598,16 @@ function Debt({debts, onAdd, onDelete, onPayment, onUpdate, onNext}) {
           ) : null}
         </Card>
       ))}
-      <Button onPress={onNext}>Ver mi situación</Button>
+      <View style={styles.actionRow}>
+        <Button secondary onPress={onPrevious}>Atrás</Button>
+        <Button onPress={onNext}>Ver mi situación</Button>
+      </View>
     </>
   );
 }
 
 function emptyDebtForm() {
-  return {name: '', balance: '', payment: '', rate: '', dueDay: ''};
+  return {name: '', balance: '', payment: '', rate: '', rateType: 'nominal', dueDay: ''};
 }
 
 function Home({available, debtCount, expenses, income, name, onDebt, onPlan, totalDebt}) {
@@ -617,41 +644,61 @@ function Home({available, debtCount, expenses, income, name, onDebt, onPlan, tot
 }
 
 function Plan({available, debts, monthly, onSim, setMonthly}) {
-  const ordered = debts.slice().sort((left, right) => right.rate - left.rate);
+  const ordered = debts.slice().sort((left, right) =>
+    getMonthlyInterestRate(right.rate, right.rateType) -
+    getMonthlyInterestRate(left.rate, left.rateType),
+  );
   return (
     <>
-      <Header title="¿Qué pago primero?" sub="Orden de referencia por tasa anual: prioriza la deuda más cara." />
+      <Header title="¿Qué pago primero?" sub="Orden de referencia por tasa mensual equivalente; supone que las tasas se mantienen." />
       <Card>
         <Text style={styles.label}>Capacidad disponible después de gastos</Text>
         <Text style={styles.big}>{money(available)}</Text>
-        <Text style={styles.muted}>Orden de mayor a menor tasa:</Text>
+        <Text style={styles.muted}>Orden por interés mensual equivalente, de mayor a menor:</Text>
         {ordered.length ? ordered.map((debt, index) => (
           <View key={debt.id} style={styles.order}>
             <Text style={styles.rank}>{index + 1}</Text>
             <Text style={styles.orderName}>{debt.name}</Text>
-            <Text style={styles.rate}>{debt.rate}%</Text>
+            <Text style={styles.rate}>{debt.rate}% {debt.rateType === 'effective' ? 'efectiva' : 'nominal'}</Text>
           </View>
         )) : <Text style={styles.muted}>Agrega deudas para generar un orden.</Text>}
         <Field label="Presupuesto mensual total para deudas" numeric onChangeText={setMonthly} value={monthly} />
+        {Number(monthly) > available ? (
+          <Text style={styles.errorText}>El presupuesto supera el dinero disponible después de tus gastos ({money(available)}). Revisa el monto antes de simular.</Text>
+        ) : null}
         <Button onPress={onSim}>Simular pago de deudas</Button>
       </Card>
     </>
   );
 }
 
-function Simulator({debts, monthly, setMonthly}) {
-  const result = simulateDebtPayoff(debts, monthly);
+function Simulator({available, debts, monthly, setMonthly}) {
+  const [strategy, setStrategy] = useState('avalanche');
+  const result = simulateDebtPayoff(debts, monthly, strategy);
   return (
     <>
-      <Header title="Simulador" sub="Estimación mensual con interés anual de cada deuda y pago tipo avalancha." />
+      <Header title="Simulador" sub="Estimación orientativa: cubre las cuotas mínimas y asigna el excedente a una deuda objetivo." />
       <Card>
         <Field label="Presupuesto mensual total" numeric onChangeText={setMonthly} value={monthly} />
         <Text style={styles.big}>{money(monthly)}</Text>
+        {Number(monthly) > available ? (
+          <Text style={styles.errorText}>El presupuesto supera el dinero disponible después de tus gastos ({money(available)}). Esta simulación podría no ser sostenible.</Text>
+        ) : null}
+        <Text style={styles.label}>Estrategia para el excedente</Text>
+        <View style={styles.actionRow}>
+          <Button selected={strategy === 'avalanche'} secondary={strategy !== 'avalanche'} onPress={() => setStrategy('avalanche')}>Avalancha</Button>
+          <Button selected={strategy === 'snowball'} secondary={strategy !== 'snowball'} onPress={() => setStrategy('snowball')}>Bola de nieve</Button>
+        </View>
+        <Text style={styles.note}>
+          {strategy === 'avalanche'
+            ? 'Avalancha prioriza la tasa más alta para reducir intereses, suponiendo que las tasas se mantienen.'
+            : 'Bola de nieve prioriza el saldo menor; puede motivar el progreso, pero no necesariamente reduce los intereses.'}
+        </Text>
         <View style={styles.result}>
           {result.status === 'payoff' ? (
             <>
               <Text style={styles.muted}>Tiempo estimado</Text>
-              <Text style={styles.resultValue}>{result.months} meses</Text>
+              <Text style={styles.resultValue}>{result.months} {result.months === 1 ? 'mes' : 'meses'}</Text>
               <Text style={styles.muted}>Intereses estimados</Text>
               <Text style={styles.resultValue}>{money(result.interest)}</Text>
               <Text style={styles.muted}>Total de pagos estimado</Text>
@@ -667,8 +714,9 @@ function Simulator({debts, monthly, setMonthly}) {
           {result.status === 'no-debt' ? <Text style={styles.muted}>Agrega una deuda con saldo mayor a cero para simular.</Text> : null}
           {result.status === 'over-50-years' ? <Text style={styles.errorTitle}>Con este presupuesto la deuda no se paga en el horizonte de 50 años.</Text> : null}
           {result.status === 'invalid-debt' ? <Text style={styles.errorTitle}>Revisa los saldos, cuotas y tasas de las deudas.</Text> : null}
+          {result.status === 'invalid-strategy' ? <Text style={styles.errorTitle}>Selecciona una estrategia válida.</Text> : null}
         </View>
-        <Text style={styles.note}>Estimación orientativa: asume tasa anual fija dividida en meses y aplica excedentes a la tasa más alta. No incluye comisiones, seguros, cambios de tasa ni condiciones particulares del crédito.</Text>
+        <Text style={styles.note}>Las tasas nominales se dividen entre 12; las efectivas anuales se convierten a una tasa mensual equivalente. No incluye comisiones, seguros, cambios de tasa ni condiciones particulares del crédito. La CAE no equivale necesariamente a la tasa de interés usada para calcular el saldo.</Text>
       </Card>
     </>
   );
@@ -714,6 +762,7 @@ function Progress({debts}) {
         </View>
         <Text style={styles.percent}>{progress.percentage}% de saldo reducido</Text>
         <Text style={styles.muted}>Pagos registrados: {progress.paymentCount}</Text>
+        <Text style={styles.note}>El porcentaje compara el saldo actual con el saldo inicial registrado. No identifica por sí solo intereses, nuevos cargos ni ajustes manuales del saldo.</Text>
         {progress.paymentCount === 0 ? (
           <Text style={styles.note}>Registra un pago y su reducción de capital para empezar a medir el progreso.</Text>
         ) : null}
@@ -743,8 +792,9 @@ const styles = StyleSheet.create({
   logoV: {fontSize: 58, fontWeight: '900', color: C.navy},
   logo: {fontSize: 42, fontWeight: '900', letterSpacing: 5, color: C.white},
   tag: {fontSize: 18, color: C.white, marginTop: 6},
-  welcomeCopy: {fontSize: 16, lineHeight: 24, textAlign: 'center', color: '#B9C7D8', marginVertical: 38},
-  button: {backgroundColor: C.teal, borderRadius: 12, paddingVertical: 12, paddingHorizontal: 15, alignItems: 'center', marginTop: 14},
+  welcomeCopy: {fontSize: 16, lineHeight: 24, textAlign: 'center', color: '#B9C7D8', marginTop: 38, marginBottom: 14},
+  welcomePrivacy: {fontSize: 12, lineHeight: 18, textAlign: 'center', color: '#B9C7D8', marginBottom: 24},
+  button: {backgroundColor: C.teal, borderRadius: 12, minHeight: 44, paddingVertical: 12, paddingHorizontal: 15, alignItems: 'center', justifyContent: 'center', marginTop: 14},
   buttonSecondary: {backgroundColor: C.mint},
   buttonDanger: {backgroundColor: '#FEE4E2'},
   buttonText: {color: C.navy, fontWeight: '900', fontSize: 14},
@@ -765,7 +815,7 @@ const styles = StyleSheet.create({
   debtName: {fontSize: 16, fontWeight: '800', flex: 1, color: C.text},
   debtAmount: {fontSize: 17, fontWeight: '900', color: C.navy},
   top: {marginBottom: 14},
-  brandSmall: {fontWeight: '900', letterSpacing: 2, color: C.teal, fontSize: 18},
+  brandSmall: {fontWeight: '900', letterSpacing: 2, color: C.tealText, fontSize: 18},
   hello: {fontSize: 23, fontWeight: '900', color: C.text, marginTop: 4},
   balance: {backgroundColor: C.navy},
   inverseLabel: {color: '#B9C7D8', fontWeight: '700'},
@@ -782,7 +832,7 @@ const styles = StyleSheet.create({
   order: {flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: C.line},
   orderName: {flex: 1, color: C.text},
   rank: {width: 28, height: 28, borderRadius: 14, backgroundColor: C.navy, color: C.white, textAlign: 'center', paddingTop: 5, fontWeight: '900', marginRight: 10},
-  rate: {fontWeight: '900', color: C.teal},
+  rate: {fontWeight: '900', color: C.tealText},
   result: {backgroundColor: C.mint, borderRadius: 14, padding: 16, marginTop: 18},
   resultValue: {fontSize: 22, fontWeight: '900', color: C.navy, marginBottom: 10},
   note: {fontSize: 12, color: C.muted, lineHeight: 18, marginTop: 12},
@@ -801,6 +851,6 @@ const styles = StyleSheet.create({
   tabbar: {position: 'absolute', bottom: 0, left: 0, right: 0, height: 78, backgroundColor: C.white, borderTopWidth: 1, borderTopColor: C.line, flexDirection: 'row', justifyContent: 'space-around', paddingTop: 8},
   tab: {alignItems: 'center', flex: 1},
   tabIcon: {fontSize: 20, color: C.muted},
-  tabText: {fontSize: 10, color: C.muted, marginTop: 3},
-  activeTab: {color: C.teal, fontWeight: '800'},
+  tabText: {fontSize: 11, color: C.muted, marginTop: 3},
+  activeTab: {color: C.tealText, fontWeight: '800'},
 });
