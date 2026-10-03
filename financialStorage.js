@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import {isValidAnnualRate} from './financialLogic';
 
 const STORAGE_KEY = '@velzia/financial-data-v1';
 const EXPENSE_CATEGORIES = ['housing', 'food', 'services', 'transport', 'other'];
@@ -36,9 +37,7 @@ function isFinancialData(value) {
         isAmount(String(debt.balance)) &&
         isAmount(String(debt.initialBalance)) &&
         isAmount(String(debt.payment)) &&
-        Number.isFinite(debt.rate) &&
-        debt.rate >= 0 &&
-        debt.rate <= 1000 &&
+        isValidAnnualRate(debt.rate) &&
         (debt.dueDay === null ||
           (Number.isInteger(debt.dueDay) && debt.dueDay >= 1 && debt.dueDay <= 31)) &&
         Array.isArray(debt.payments) &&

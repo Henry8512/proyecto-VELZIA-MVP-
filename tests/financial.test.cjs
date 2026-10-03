@@ -34,6 +34,9 @@ const finance = loadModule('financialLogic.js');
 let storedValue = null;
 let writeCount = 0;
 const storage = loadModule('financialStorage.js', packageName => {
+  if (packageName === './financialLogic') {
+    return finance;
+  }
   assert.equal(packageName, '@react-native-async-storage/async-storage');
   return {
     __esModule: true,
@@ -88,6 +91,16 @@ test('suma categorías de gastos', () => {
     transport: '25000',
     other: '5000',
   }), 380000);
+});
+
+test('acepta tasas anuales decimales válidas y rechaza tasas fuera del rango', () => {
+  assert.equal(finance.isValidAnnualRate('19.9'), true);
+  assert.equal(finance.isValidAnnualRate('0'), true);
+  assert.equal(finance.isValidAnnualRate('1000'), true);
+  assert.equal(finance.isValidAnnualRate('1000.01'), false);
+  assert.equal(finance.isValidAnnualRate('-1'), false);
+  assert.equal(finance.isValidAnnualRate('19.99999'), false);
+  assert.equal(finance.isValidAnnualRate(''), false);
 });
 
 test('el progreso refleja únicamente la diferencia entre saldo inicial y actual', () => {

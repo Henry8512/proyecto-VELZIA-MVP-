@@ -5,6 +5,13 @@ export function sumExpenseCategories(expenseCategories) {
   );
 }
 
+export function isValidAnnualRate(value) {
+  const normalized = String(value).trim();
+  return /^\d{1,4}(?:\.\d{1,4})?$/.test(normalized) &&
+    Number(normalized) >= 0 &&
+    Number(normalized) <= 1000;
+}
+
 export function calculateDebtProgress(debts) {
   const initialDebt = debts.reduce((total, debt) => total + debt.initialBalance, 0);
   const currentDebt = debts.reduce((total, debt) => total + debt.balance, 0);

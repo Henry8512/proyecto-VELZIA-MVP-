@@ -13,6 +13,7 @@ import {loadFinancialData, saveFinancialData} from './financialStorage';
 import {
   buildPaymentCalendar,
   calculateDebtProgress,
+  isValidAnnualRate,
   simulateDebtPayoff,
   sumExpenseCategories,
 } from './financialLogic';
@@ -354,9 +355,7 @@ function isValidDraft(data) {
       numericValue(String(debt.balance)) &&
       numericValue(String(debt.initialBalance)) &&
       numericValue(String(debt.payment)) &&
-      Number.isFinite(debt.rate) &&
-      debt.rate >= 0 &&
-      debt.rate <= 1000 &&
+      isValidAnnualRate(debt.rate) &&
       (debt.dueDay === null ||
         (Number.isInteger(debt.dueDay) && debt.dueDay >= 1 && debt.dueDay <= 31)) &&
       debt.payments.every(payment =>
@@ -442,7 +441,7 @@ function Debt({debts, onAdd, onDelete, onPayment, onUpdate, onNext}) {
     const rate = Number(form.rate);
     const dueDay = Number(form.dueDay);
     if (!form.name.trim() || !numericValue(form.balance) || !numericValue(form.payment) ||
-      !numericValue(form.rate) || rate > 1000 || !Number.isInteger(dueDay) || dueDay < 1 || dueDay > 31) {
+      !isValidAnnualRate(form.rate) || !Number.isInteger(dueDay) || dueDay < 1 || dueDay > 31) {
       setFormError('Revisa el nombre, los montos, la tasa anual (0–1000%) y el vencimiento (1–31).');
       return;
     }

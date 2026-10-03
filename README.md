@@ -2,6 +2,8 @@
 
 Prototipo funcional inicial de la app VELZIA para organizar deudas, crear escenarios de pago y visualizar vencimientos.
 
+La app usa Expo SDK 57. La pantalla de inicio nativa se configura mediante el plugin `expo-splash-screen`.
+
 ## Ejecutar
 
 1. Instala Node.js LTS.
@@ -20,7 +22,7 @@ Prototipo funcional inicial de la app VELZIA para organizar deudas, crear escena
 - Simulador mensual orientativo que considera tasa anual, cuotas mínimas y pagos tipo avalancha
 - Calendario generado a partir del día de vencimiento de cada deuda
 - Seguimiento del saldo respecto al saldo inicial registrado
-- Validación de montos en pesos enteros y vencimientos entre los días 1 y 31
+- Validación de montos en pesos enteros, tasas anuales decimales y vencimientos entre los días 1 y 31
 
 Los datos financieros se guardan en el dispositivo y se recuperan al volver a abrir la app. Los datos existentes de la versión anterior se migran; sus fechas de vencimiento quedan sin definir, ya que no estaban registradas. Los datos no se sincronizan entre dispositivos ni se respaldan en una cuenta; desinstalar la app puede borrarlos.
 
@@ -33,3 +35,5 @@ El simulador asume una tasa anual fija dividida en 12 meses y no incluye comisio
 Ejecuta `npm test` para validar cálculos, calendario, migración y persistencia.
 
 Antes de producción siguen pendientes la protección adecuada de datos sensibles, autenticación, sincronización y copias de seguridad, notificaciones y monetización.
+
+La auditoría de dependencias aún informa vulnerabilidades transitivas en la cadena de herramientas de Expo, incluida `node-forge` desde Expo CLI y certificados de firma. El registro consultado no ofrece una versión corregida de `node-forge`; no se aplicó un override de criptografía ni un downgrade de Expo. Revisa `npm audit` antes de cada distribución y no publiques hasta confirmar que esas alertas se resolvieron aguas arriba.
